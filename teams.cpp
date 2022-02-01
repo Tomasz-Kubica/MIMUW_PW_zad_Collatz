@@ -17,7 +17,7 @@ teamNewThreadsThread(InfInt input, uint64_t *result, std::mutex *mut,
                      uint64_t *activeThreads) {
     *result = calcCollatz(input);
     mut->lock();
-    activeThreads--;
+    (*activeThreads)--;
     condActive->notify_one();
     mut->unlock();
 }
