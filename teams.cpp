@@ -56,16 +56,29 @@ teamNewThreadsThread(InfInt input, uint64_t *result, std::mutex *mut,
 }
 
 inline void
-teamConstThreadsThread(ContestInput::iterator input,
-                       ContestInput::iterator result,
+teamConstThreadsThread(ContestInput::const_iterator input,
+                       ContestResult::iterator result,
                        size_t to_proces,
-                       std::shared_ptr<SharedResults> shared) {
+                       std::shared_ptr<SharedResults> shared
+//                       std::mutex *mut,
+                       //std::condition_variable *cv,
+                       //int *active
+                       ) {
+    //std::cout << "start: " << std::this_thread::get_id() << std::endl;
     for (int i = 0; i < to_proces; i++) {
         if (shared)
             *result = collatzWithShared(*input, shared);
         else
             *result = calcCollatz(*input);
+        input++;
+        result++;
     }
+//    mut->lock();
+//    (*active)--;
+//    if (*active == 0)
+//        cv->notify_all();
+//    mut->unlock();
+    //std::cout << "koniec: " << std::this_thread::get_id() << std::endl;
 }
 
 ContestResult TeamNewThreads::runContestImpl(ContestInput const &contestInput) {
@@ -117,7 +130,52 @@ ContestResult TeamNewThreads::runContestImpl(ContestInput const &contestInput) {
 ContestResult
 TeamConstThreads::runContestImpl(ContestInput const &contestInput) {
     ContestResult r;
-    //TODO
+    r.resize(contestInput.size());
+    std::mutex mut;
+    std::condition_variable cv;
+    int active_threads = this->getSize();
+    size_t forEach = contestInput.size() / this->getSize();
+    size_t additional = contestInput.size() - (forEach * this->getSize());
+    ContestInput::const_iterator inputIt = contestInput.begin();
+    ContestResult::iterator resIt = r.begin();
+    std::vector<std::thread> threads;
+    //std::cout << "startowanie wątków" << std::endl;
+    for (size_t i = 0; i < this->getSize(); i++) {
+        size_t s = forEach;
+        if (additional > 0) {
+            s++;
+            additional--;
+        }
+        //std::cout << "przed startem wątku" << std::endl;
+        std::thread t = createThread(teamConstThreadsThread,
+                                     inputIt,
+                                     resIt,
+                                     s,
+                                     this->getSharedResults()
+//                                     &mut,
+//                                     &cv,
+//                                     &active_threads
+                                     );
+        threads.push_back(std::move(t));
+        //std::cout << "po starcie" << std::endl;
+        inputIt = inputIt + s;
+        resIt = resIt + s;
+        //std::cout << "po inkrementacji" << std::endl;
+    }
+//    {
+//        std::unique_lock<std::mutex> lock(mut);
+//        std::cout << "main lock" << std::endl;
+//        cv.wait(lock, [&active_threads]{return active_threads == 0;});
+//    }
+    for (auto &i : threads)
+        i.join();
+//    for (auto a : contestInput)
+//        std::cout << a << ' ';
+//    std::cout << std::endl;
+//    for (auto a : r)
+//        std::cout << a << ' ';
+    //std::cout << std::endl;
+    //std::cout << "main end" << std::endl;
     return r;
 }
 
