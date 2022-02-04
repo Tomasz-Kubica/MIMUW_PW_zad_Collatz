@@ -14,32 +14,42 @@ class SharedResults
 public:
     using getResult = std::pair<bool, uint64_t>;
 
-     getResult get(InfInt key) {
+     getResult getOrReserve(InfInt key) {
          getResult r;
-         mut.lock();
+         //std::cout << "pre lock " << std::this_thread::get_id() << std::endl;
+         std::unique_lock<std::mutex> lock(mut);
+         //std::cout << "lock" << std::endl;
          auto it = results.find(key);
-         if (it != results.end()) {
+         //std::cout << "pozyskano iterator" << std::endl;
+         if (it == results.end()) {
+             //std::cout << "nie ma" << std::endl;
              r = {false, 0};
+             std::shared_ptr<std::condition_variable> cv(new std::condition_variable);
+             results.insert({key, {{0, false}, cv}});
          } else {
-             r = {true, it->second};
+             //std::cout << "jest" << std::endl;
+             auto cv = it->second.second;
+             cv->wait(lock , [&key, this]{return this->results[key].first.second;});
+             r = {true, results[key].first.first};
          }
-         mut.unlock();
          return r;
     }
 
-    void set(InfInt key, uint64_t value) {
-         mut.lock();
-         auto it = results.find(key);
-         if (it == results.end()) {
-             results.insert({key, value});
-         }
-         mut.unlock();
-     }
+    void setReserved(InfInt key, uint64_t value) {
+        //std::cout << "setting" << std::endl;
+        std::unique_lock<std::mutex> lock(mut);
+        auto it = results.find(key);
+        assert(it != results.end());
+        mapValue v = it->second;
+        v.first = {value, true};
+        results[key] = v;
+        v.second->notify_all();
+    }
 private:
-    using mapValue = std::pair<uint64_t, std::mutex>;
+    using mapValue = std::pair<std::pair<uint64_t, bool>, std::shared_ptr<std::condition_variable>>;
 
     std::mutex mut;
-    std::map<InfInt, uint64_t> results;
+    std::map<InfInt, mapValue> results;
 };
 
 #endif
