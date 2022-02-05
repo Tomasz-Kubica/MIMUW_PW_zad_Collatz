@@ -208,7 +208,18 @@ ContestResult TeamConstProcesses::runContest(ContestInput const &contestInput) {
 }
 
 ContestResult TeamAsync::runContest(ContestInput const &contestInput) {
+    using f_t = std::future<uint64_t>;
     ContestResult r;
-    //TODO
+    std::vector<f_t> results;
+    auto shared = this->getSharedResults();
+    for (auto i : contestInput) {
+        if (shared)
+            results.push_back(std::async(std::launch::async, collatzWithShared, i, shared));
+        else
+            results.push_back(std::async(std::launch::async, calcCollatz, i));
+    }
+    for (auto &i : results)
+        r.push_back(i.get());
+    return r;
     return r;
 }
