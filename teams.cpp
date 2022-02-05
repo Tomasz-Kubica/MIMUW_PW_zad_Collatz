@@ -180,8 +180,18 @@ TeamConstThreads::runContestImpl(ContestInput const &contestInput) {
 }
 
 ContestResult TeamPool::runContest(ContestInput const &contestInput) {
+    using f_t = std::future<uint64_t>;
     ContestResult r;
-    //TODO
+    std::vector<f_t> results;
+    auto shared = this->getSharedResults();
+    for (auto i : contestInput) {
+        if (shared)
+            results.push_back(this->pool.push(collatzWithShared, i, shared));
+        else
+            results.push_back(this->pool.push(calcCollatz, i));
+    }
+    for (auto &i : results)
+        r.push_back(i.get());
     return r;
 }
 
