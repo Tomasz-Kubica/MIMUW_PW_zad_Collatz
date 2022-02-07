@@ -1,11 +1,18 @@
 #include <utility>
 #include <deque>
 #include <future>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include "teams.hpp"
 #include "contest.hpp"
 #include "collatz.hpp"
 #include "sharedresults.hpp"
+#include "err.h"
+
+#define PIPE_READ 0
+#define PIPE_WRITE 1
 
 uint64_t
 collatzWithShared(InfInt input, std::shared_ptr<SharedResults> results) {
@@ -195,9 +202,114 @@ ContestResult TeamPool::runContest(ContestInput const &contestInput) {
     return r;
 }
 
+void saveFromPipe(int desc, ContestResult &result) {
+    //std::cout << desc << " saving from pipe" << std::endl;
+    uint64_t singleResult;
+    int readOut = 1;
+    while (readOut) {
+        readOut = read(desc, &singleResult, sizeof(uint64_t));
+        //std::cout << readOut << std::endl;
+        if (readOut == -1)
+            assert(false);
+        else if (readOut != 0) {
+            result.push_back(singleResult);
+            //std::cout << singleResult << std::endl;
+        }
+        //std::cout << desc << " " << readOut << std::endl;
+    }
+}
+
 ContestResult TeamNewProcesses::runContest(ContestInput const &contestInput) {
     ContestResult r;
-    //TODO
+
+    std::vector<int> readDesc;
+    size_t activeProcesses = 0;
+    size_t savedResults = 0;
+
+    for (auto singleInput : contestInput) {
+        //std::cout << singleInput << std::endl;
+        if (activeProcesses == getSize()) {
+            auto desc = readDesc[savedResults];
+            savedResults++;
+            saveFromPipe(desc, r);
+            if (close(desc) == -1)
+                assert(false);
+            if (wait(0) == -1) syserr("err in wait"); // assert(false);
+            activeProcesses--;
+        }
+        activeProcesses++;
+        int pipe1_desc[2];
+        int pipe2_desc[2];
+        if (pipe(pipe1_desc) == -1)
+            syserr("err in making pipe1");
+        if (pipe(pipe2_desc) == -1)
+            syserr("err in making pipe2");
+        switch (fork()) {
+            case -1:
+                syserr("error in fork");
+                //assert(false);
+            case 0:
+                /*if (close(0) == -1)
+                    syserr("err in closing standard input");
+                if (close(1) == -1)
+                    syserr("err in closing standard output");*/
+                if (dup2(pipe1_desc[PIPE_READ], 0) == -1) // input dziecka
+                    //assert(false);
+                    syserr("error in dup2 input");
+                if (dup2(pipe2_desc[PIPE_WRITE], 1) == -1) // output dziecka
+                    //assert(false);
+                    syserr("error in dup2 output");
+
+                // zamykanie niepotrzebnych deskryptorów
+                if (close(pipe1_desc[PIPE_READ]) == -1)
+                    //assert(false);
+                    syserr("error in close(pipe1_desc[0])");
+                if (close(pipe1_desc[PIPE_WRITE]) == -1)
+                    //assert(false);
+                    syserr("error in close(pipe1_desc[1])");
+                if (close(pipe2_desc[PIPE_READ]) == -1)
+                    //assert(false);
+                    syserr("error in close(pipe2_desc[0])");
+                if (close(pipe2_desc[PIPE_WRITE]) == -1)
+                    //assert(false);
+                    syserr("error in close(pipe2_desc[1])");
+
+                execlp("./new_process", "new_process", (char*)NULL);
+                //assert(false);
+                syserr("error in execlp");
+                break;
+            default:
+                if (close(pipe1_desc[PIPE_READ]) == -1)
+                    //assert(false);
+                    syserr("error in close(pipe1_desc[0])");
+                if (close(pipe2_desc[PIPE_WRITE]) == -1)
+                    syserr("error in close(pipe2_desc[1])");
+                    //assert(false);
+
+                readDesc.push_back(pipe2_desc[PIPE_READ]);
+                //int write = pipe1_desc[1];
+                std::string asString = singleInput.toString();
+                //std::cout << singleInput << " = " << asString.size() << " -> " << calcCollatz(singleInput) << std::endl;
+                write(pipe1_desc[PIPE_WRITE], asString.c_str(), sizeof(char ) * (asString.size()));
+                if (close(pipe1_desc[PIPE_WRITE]) == -1)
+                    assert(false);
+                break;
+        }
+    }
+
+    while (activeProcesses > 0) {
+        wait(0);
+        activeProcesses--;
+    }
+
+    while (savedResults < readDesc.size()) {
+        auto desc = readDesc[savedResults];
+        savedResults++;
+        saveFromPipe(desc, r);
+        if (close(desc) == -1)
+            assert(false);
+    }
+
     return r;
 }
 
