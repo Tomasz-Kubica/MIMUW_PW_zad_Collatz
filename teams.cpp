@@ -4,15 +4,17 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <semaphore.h>
 
 #include "teams.hpp"
 #include "contest.hpp"
 #include "collatz.hpp"
 #include "sharedresults.hpp"
 #include "err.h"
-
-#define PIPE_READ 0
-#define PIPE_WRITE 1
+#include "shared_mem_info.h"
 
 uint64_t
 collatzWithShared(InfInt input, std::shared_ptr<SharedResults> results) {
@@ -226,6 +228,29 @@ ContestResult TeamNewProcesses::runContest(ContestInput const &contestInput) {
     size_t activeProcesses = 0;
     size_t savedResults = 0;
 
+    int fd_memory = -1;
+    sem_t *sem;
+    if (getSharedResults()) {
+        fd_memory = shm_open(SHM_NAME, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        if (fd_memory == -1) syserr("error in shm_open");
+        ftruncate(fd_memory, SHM_SIZE);
+
+        bool *mapped_mem;
+        mapped_mem = (bool*)mmap(NULL, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd_memory, 0);
+        if(mapped_mem == MAP_FAILED)
+            syserr("error in mmap in teams");
+        *mapped_mem = false;
+        munmap(mapped_mem, SHM_SIZE);
+
+        sem = sem_open(SEM_NAME, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR, 0);
+        if (sem == SEM_FAILED)
+            syserr("sem_open teams");
+        if (sem_post(sem) == -1)
+            syserr("sem_post teams");
+        if (sem_close(sem))
+            syserr("sem_close teams");
+    }
+
     for (auto singleInput : contestInput) {
         //std::cout << singleInput << std::endl;
         if (activeProcesses == getSize()) {
@@ -290,7 +315,10 @@ ContestResult TeamNewProcesses::runContest(ContestInput const &contestInput) {
                 //int write = pipe1_desc[1];
                 std::string asString = singleInput.toString();
                 //std::cout << singleInput << " = " << asString.size() << " -> " << calcCollatz(singleInput) << std::endl;
-                write(pipe1_desc[PIPE_WRITE], asString.c_str(), sizeof(char ) * (asString.size()));
+                char is_shared = (bool)getSharedResults() ? 't' : 'f';
+                write(pipe1_desc[PIPE_WRITE], &is_shared, sizeof(char));
+                if (write(pipe1_desc[PIPE_WRITE], asString.c_str(), sizeof(char) * asString.size()) == -1)
+                    syserr("error in writing input to pipe");
                 if (close(pipe1_desc[PIPE_WRITE]) == -1)
                     assert(false);
                 break;
@@ -308,6 +336,13 @@ ContestResult TeamNewProcesses::runContest(ContestInput const &contestInput) {
         saveFromPipe(desc, r);
         if (close(desc) == -1)
             assert(false);
+    }
+
+    if (getSharedResults()) {
+        close(fd_memory);
+        shm_unlink(SHM_NAME);
+        if (sem_unlink(SEM_NAME) == -1)
+            syserr("error in sem_unlink");
     }
 
     return r;

@@ -7,6 +7,6 @@
 #define SHM_NAME "/collatz_process_memory"
 #define SEM_NAME "/collatz_process_semaphore"
 
-#define SHM_SIZE 1
+#define SHM_SIZE 256000000
 
 #endif //COLLATZ_SHARED_MEM_INFO_H
