@@ -33,7 +33,6 @@ sem_t *sem;
 SharedList *list;
 
 std::pair<bool, uint64_t> searchList(InfInt x) {
-//    std::cerr << "search start" << std::endl;
     if (sem_wait(sem) == -1)
         syserr("error in wait");
 
@@ -42,20 +41,11 @@ std::pair<bool, uint64_t> searchList(InfInt x) {
     std::string str = x.toString();
 
     while (l != nullptr) {
-//        if (x.toString() == "1586") {
-//            std::cerr << "." << std::endl;
-//            std::cerr << "searched str: " << str.c_str() << std::endl;
-//            std::cerr << "is next: " << l->is_next << std::endl;
-//            std::cerr << "result: " << l->result << std::endl;
-//            std::cerr << "number: " << listGetNumber(l) << std::endl;
-//        }
-
         if (strcmp(listGetNumber(l), str.c_str()) == 0) {
             //std::cerr << listGetNumber(l) << " ^ " << str.c_str() << std::endl;
             uint64_t r = l->result;
             if (sem_post(sem) == -1)
                 syserr("error in post");
-//            std::cerr << "search end true" << std::endl;
             return {true, r};
         }
         if (l->is_next)
@@ -67,13 +57,10 @@ std::pair<bool, uint64_t> searchList(InfInt x) {
     if (sem_post(sem) == -1)
         syserr("error in post");
 
-//    std::cerr << "search end false" << std::endl;
     return {false, 0};
 }
 
 void addToList(InfInt x, uint64_t r) {
-//    if (x.toString() == "1586" || r == 78 || r == 36)
-//        std::cerr << "### wstawione: " << x << " -> " << r << std::endl;
     if (sem_wait(sem) == -1)
         syserr("error in wait");
 
@@ -89,8 +76,6 @@ void addToList(InfInt x, uint64_t r) {
 
     if (sem_post(sem) == -1)
         syserr("error in post");
-
-//    std::cerr << "add to list end list: " << list << std::endl;
 }
 
 uint64_t collatzWithShared(InfInt x) {
@@ -108,18 +93,11 @@ uint64_t collatzWithShared(InfInt x) {
 }
 
 int main() {
-//    int x = 0;
-//    while (true) {
-//        x++;
-//        std::cerr << x << std::endl;
-//    }
-
     int fd_memory = -1;
     void *mapped_mem;
 
     char c;
     std::cin >> c;
-    //std::cerr << c << std::endl;
     bool is_shared = c == 't';
     if (is_shared) {
         fd_memory = shm_open(SHM_NAME, O_RDWR, S_IRUSR | S_IWUSR);
@@ -135,16 +113,12 @@ int main() {
         bool *initialized = (bool*)mapped_mem;
         list = (SharedList*)(initialized + 1);
 
-//        std::cerr << "waiting for init check" << std::endl;
-
         if (sem_wait(sem) == -1)
             syserr("error in wait init");
 
-//        std::cerr << "xxx" << std::endl;
 
 
         if (!*initialized) {
-//            std::cerr << "initialized start" << std::endl;
 
             *initialized = true;
             char *str = (char*)(list + 1);
@@ -154,7 +128,6 @@ int main() {
             //std::cerr << next << " next in init" << std::endl;
             *list = {2137, false, dummyStr.size() + 1};
 
-//            std::cerr << "initialized finished" << std::endl;
         }
 
         if (sem_post(sem) == -1)
@@ -165,10 +138,12 @@ int main() {
     InfInt a = 1;
     while (std::cin >> a) {
         inputs.push_back(a);
-//        std::cerr << a << std::endl;
     }
 
+
+    size_t  count = 0;
     for (auto i: inputs) {
+        count++;
         uint64_t r;
         if (is_shared)
             r = collatzWithShared(i);
@@ -176,7 +151,6 @@ int main() {
             r = calcCollatz(i);
         if (write(1, &r, sizeof(uint64_t)) == -1)
             syserr("error in write in new_proces");
-        //std::cerr << i << " " << r << std::endl;
     }
 
     if (is_shared) {
@@ -185,5 +159,6 @@ int main() {
         if (sem_close(sem))
             syserr("sem_close");
     }
+
     return 0;
 }

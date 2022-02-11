@@ -263,17 +263,17 @@ ContestResult TeamNewProcesses::runContest(ContestInput const &contestInput) {
         }
     }
 
-    while (activeProcesses > 0) {
-        wait(0);
-        activeProcesses--;
-    }
-
     while (savedResults < readDesc.size()) {
         auto desc = readDesc[savedResults];
         savedResults++;
         saveFromPipe(desc, r);
         if (close(desc) == -1)
             assert(false);
+    }
+
+    while (activeProcesses > 0) {
+        wait(0);
+        activeProcesses--;
     }
 
     if (getSharedResults()) {
@@ -288,7 +288,122 @@ ContestResult TeamNewProcesses::runContest(ContestInput const &contestInput) {
 
 ContestResult TeamConstProcesses::runContest(ContestInput const &contestInput) {
     ContestResult r;
-    //TODO
+
+    std::vector<int> readDesc;
+
+    int fd_memory = -1;
+    sem_t *sem;
+    if (getSharedResults()) {
+        fd_memory = shm_open(SHM_NAME, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        if (fd_memory == -1) syserr("error in shm_open");
+        ftruncate(fd_memory, SHM_SIZE);
+
+        bool *mapped_mem;
+        mapped_mem = (bool*)mmap(NULL, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd_memory, 0);
+        if(mapped_mem == MAP_FAILED)
+            syserr("error in mmap in teams");
+        *mapped_mem = false;
+        munmap(mapped_mem, SHM_SIZE);
+
+        sem = sem_open(SEM_NAME, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR, 0);
+        if (sem == SEM_FAILED)
+            syserr("sem_open teams");
+        if (sem_post(sem) == -1)
+            syserr("sem_post teams");
+        if (sem_close(sem))
+            syserr("sem_close teams");
+    }
+
+    size_t forEach = contestInput.size() / getSize();
+    size_t additional = contestInput.size() - (forEach * getSize());
+    size_t currentInput = 0;
+
+    for (uint64_t i = 0; i < getSize(); i++) {
+//        if (activeProcesses == getSize()) {
+//            auto desc = readDesc[savedResults];
+//            savedResults++;
+//            saveFromPipe(desc, r);
+//            if (close(desc) == -1)
+//                assert(false);
+//            if (wait(0) == -1) syserr("err in wait"); // assert(false);
+//            activeProcesses--;
+//        }
+//        activeProcesses++;
+        int pipe1_desc[2];
+        int pipe2_desc[2];
+        if (pipe(pipe1_desc) == -1)
+            syserr("err in making pipe1");
+        if (pipe(pipe2_desc) == -1)
+            syserr("err in making pipe2");
+        switch (fork()) {
+            case -1:
+                syserr("error in fork");
+            case 0:
+                if (dup2(pipe1_desc[PIPE_READ], 0) == -1) // input dziecka
+                    syserr("error in dup2 input");
+                if (dup2(pipe2_desc[PIPE_WRITE], 1) == -1) // output dziecka
+                    syserr("error in dup2 output");
+
+                // zamykanie niepotrzebnych deskryptorów
+                if (close(pipe1_desc[PIPE_READ]) == -1)
+                    syserr("error in close(pipe1_desc[0])");
+                if (close(pipe1_desc[PIPE_WRITE]) == -1)
+                    syserr("error in close(pipe1_desc[1])");
+                if (close(pipe2_desc[PIPE_READ]) == -1)
+                    syserr("error in close(pipe2_desc[0])");
+                if (close(pipe2_desc[PIPE_WRITE]) == -1)
+                    syserr("error in close(pipe2_desc[1])");
+
+                execlp("./new_process", "new_process", (char*)NULL);
+                syserr("error in execlp");
+                break;
+            default:
+                if (close(pipe1_desc[PIPE_READ]) == -1)
+                    syserr("error in close(pipe1_desc[0])");
+                if (close(pipe2_desc[PIPE_WRITE]) == -1)
+                    syserr("error in close(pipe2_desc[1])");
+
+                readDesc.push_back(pipe2_desc[PIPE_READ]);
+                char is_shared = (bool)getSharedResults() ? 't' : 'f';
+                write(pipe1_desc[PIPE_WRITE], &is_shared, sizeof(char));
+
+                size_t forThis = forEach;
+                if (additional > 0) {
+                    forThis++;
+                    additional--;
+                }
+                for (size_t j = 0; j < forThis; j++) {
+                    std::string asString = contestInput[currentInput].toString();
+                    asString += ' ';
+                    currentInput++;
+                    if (write(pipe1_desc[PIPE_WRITE], asString.c_str(),
+                              sizeof(char) * (asString.size())) == -1)
+                        syserr("error in writing input to pipe");
+                }
+
+                if (close(pipe1_desc[PIPE_WRITE]) == -1)
+                    assert(false);
+                break;
+        }
+    }
+
+    for (auto desc: readDesc) {
+        saveFromPipe(desc, r);
+        if (close(desc) == -1)
+            assert(false);
+    }
+
+    for (uint32_t i = 0; i < getSize(); i++) {
+        wait(0);
+    }
+
+    if (getSharedResults()) {
+        close(fd_memory);
+        shm_unlink(SHM_NAME);
+        if (sem_unlink(SEM_NAME) == -1)
+            syserr("error in sem_unlink");
+    }
+
     return r;
 }
 
