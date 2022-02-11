@@ -87,8 +87,6 @@ uint64_t collatzWithShared(InfInt x) {
         r = calcCollatz(x);
         addToList(x, r);
     }
-    if (r != calcCollatz(x))
-        std::cerr << "!!! " << x << ": " << calcCollatz(x) << " =/= " << r << std::endl;
     return r;
 }
 
